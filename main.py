@@ -19,93 +19,39 @@ Options:
 
 import click
 from mygeotab import API
-from mygeotab.ext import feed
-from tempfile import NamedTemporaryFile
 from datetime import datetime
-import shutil
+from time import sleep
 import csv
-
-# CSV name
-filename = 'ChristianChallenge.csv'
+import os
 
 # CSV fielnames
-fieldnames = ['Id', 'VIN', 'Coordinates', 'Odometer']
+fieldnames = ['Date', 'Id', 'VIN', 'Coordinates', 'Odometer']
+# CSV filename
+filename = "ChristianChallenge_default.csv"
+# Inizialitate CSV
+i = 0
+while os.path.exists(f"ChristianChallenge_{i}.csv"):
+    i += 1
+filename = f"ChristianChallenge_{i}.csv"
+# Create File
+newfile = open(filename, 'w', newline='')
+writer = csv.DictWriter(newfile, fieldnames=fieldnames)
+# Write down header line
+writer.writeheader()
+newfile.close()
 
 
-# Class for the "Device" feed
-class DeviceListener(feed.DataFeedListener):
-    def __init__(self, api):
-        self.api = api
-        super(feed.DataFeedListener, self).__init__()
-
-    def on_data(self, data):
-        for device in data:
-            updateCSV(device['id'], "VIN", device["vehicleIdentificationNumber"])
-            print("DeviceListener")
-
-    def on_error(self, error):
-        click.secho(error, fg="red")
-        return True
-
-
-# Class for the "DeviceStatusInfo" feed
-class DeviceStatusListener(feed.DataFeedListener):
-    def __init__(self, api):
-        self.api = api
-        super(feed.DataFeedListener, self).__init__()
-
-    def on_data(self, data):
-        for device in data:
-            updateCSV(device['device']['id'], "Coordinates", "{" + str(device['latitude']) + "," + str(device['longitude']) + "}")
-            print("DeviceStatusListener")
-
-    def on_error(self, error):
-        click.secho(error, fg="red")
-        return True
-
-
-# Class for the "StatusData" feed
-class StatusDataListener(feed.DataFeedListener):
-    def __init__(self, api):
-        self.api = api
-        super(feed.DataFeedListener, self).__init__()
-
-    def on_data(self, data):
-        for device in data:
-            if device["data"] > 0:
-                updateCSV(device['device']['id'], "Odometer", device["data"])
-                print("StatusDataListener")
-
-    def on_error(self, error):
-        click.secho(error, fg="red")
-        return True
-
-
-# CSV initialization function
-def initializeCSV(api):
-    with open(filename, 'w', newline='') as file:
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
-        writer.writeheader()
-        devices = api.call('Get', typeName='Device')
-        for device in devices:
+def updatevehicle(api, vehicleId):
+    with open(filename, 'a', newline='') as file:
+        filewriter = csv.DictWriter(file, fieldnames=fieldnames)
+        try:
+            device = api.call('Get', typeName='Device', search=dict(id=vehicleId))[0]
             statusinfo = api.call('Get', typeName='DeviceStatusInfo', search=dict(deviceSearch=dict(id=device["id"]), diagnosticSearch=dict(id='DiagnosticOdometerId')))
             statusdata = api.call('Get', typeName='StatusData', search=dict(deviceSearch=dict(id=device["id"]), diagnosticSearch=dict(id='DiagnosticOdometerAdjustmentId'), fromdate=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"), todate=datetime.now().strftime("%Y-%m-%dT%H:%M:%S")))
-            writer.writerow({'Id': device["id"], 'VIN': device["vehicleIdentificationNumber"], 'Coordinates': {statusinfo[0]['latitude'], statusinfo[0]['longitude']}, 'Odometer': statusdata[0]['data']})
-
-
-# CSV update function
-def updateCSV(identification, field, value):
-    tempfile = NamedTemporaryFile(mode='w', delete=False)
-    with open(filename, 'r') as csvfile, tempfile:
-        reader = csv.DictReader(csvfile, fieldnames=fieldnames)
-        writer = csv.DictWriter(tempfile, fieldnames=fieldnames)
-        for row in reader:
-            row = {'Id': row['Id'], 'VIN': row['VIN'], 'Coordinates': row['Coordinates'], 'Odometer': row['Odometer']}
-            if row['Id'] == str(identification):
-                print('updating row', row['Id'])
-                row[field] = value
-            writer.writerow(row)
-    shutil.move(tempfile.name, filename)
+            filewriter.writerow({'Date': datetime.now().strftime("%d/%m/%Y %H:%M:%S"), 'Id': device["id"], 'VIN': device["vehicleIdentificationNumber"], 'Coordinates': {statusinfo[0]['latitude'], statusinfo[0]['longitude']}, 'Odometer': statusdata[0]['data']})
+        except Exception:
+            print("error while collecting a data input")
+    file.close()
 
 
 @click.command(help="A console data feeder example")
@@ -124,12 +70,20 @@ def main(database, user=None, password=None, server=None, interval=60):
     # API authentication
     api = API(database=database, username=user, password=password, server=server)
     api.authenticate()
-    # Create the CSV with the initial data
-    initializeCSV(api)
-    # Create the datafeeds for the different information
-    feed.DataFeed(api, DeviceListener(api), "Device", interval=interval).start()
-    feed.DataFeed(api, DeviceStatusListener(api), "DeviceStatusInfo", interval=interval).start()
-    feed.DataFeed(api, StatusDataListener(api), "StatusData", interval=interval, search=dict(diagnosticSearch=dict(id='DiagnosticOdometerAdjustmentId'), fromdate=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"), todate=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"))).start()
+    devices = api.call('Get', typeName='Device')
+    # Populate the CSV with the initial data
+    for device in devices:
+        updatevehicle(api, device["id"])
+
+    while True:
+        try:
+            devices = api.call('Get', typeName='Device')
+            # Populate the CSV with the initial data
+            for device in devices:
+                updatevehicle(api, device["id"])
+        except (api.MyGeotabException, ConnectionError) as exception:
+            print(exception)
+        sleep(interval)
 
 
 if __name__ == "__main__":
