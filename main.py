@@ -70,10 +70,6 @@ def main(database, user=None, password=None, server=None, interval=60):
     # API authentication
     api = API(database=database, username=user, password=password, server=server)
     api.authenticate()
-    devices = api.call('Get', typeName='Device')
-    # Populate the CSV with the initial data
-    for device in devices:
-        updatevehicle(api, device["id"])
 
     while True:
         try:
