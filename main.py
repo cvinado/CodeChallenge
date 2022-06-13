@@ -51,6 +51,7 @@ def updatevehicle(api, vehicleId):
             filewriter.writerow({'Date': datetime.now().strftime("%d/%m/%Y %H:%M:%S"), 'Id': device["id"], 'VIN': device["vehicleIdentificationNumber"], 'Coordinates': {statusinfo[0]['latitude'], statusinfo[0]['longitude']}, 'Odometer': statusdata[0]['data']})
         except Exception:
             print("error while collecting a data input")
+        print("Updated vehicle " + device["id"])
     file.close()
 
 
@@ -74,11 +75,13 @@ def main(database, user=None, password=None, server=None, interval=60):
     while True:
         try:
             devices = api.call('Get', typeName='Device')
+            print(len(devices) + "vehicles readed")
             # Populate the CSV with the initial data
             for device in devices:
                 updatevehicle(api, device["id"])
         except (api.MyGeotabException, ConnectionError) as exception:
             print(exception)
+        print ("Wait " + interval + " seconds")
         sleep(interval)
 
 
